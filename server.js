@@ -39,6 +39,17 @@ let addons = loadConfig();
 console.log(`Loaded ${addons.length} addon(s) from ${CONFIG_PATH}`);
 addons.forEach(a => console.log(`  - ${a.repo} -> ${a.path} (${a.branch})`));
 
+// Trust every addon's mounted directory for git, in one shot at startup.
+// Host-mounted volumes are usually owned by a different UID than the
+// container's git process, which trips git's "dubious ownership" check
+// (CVE-2022-24765). This container only ever touches these specific
+// addon paths, so trusting them globally is safe for this use case.
+try {
+  await execFileAsync('git', ['config', '--global', '--add', 'safe.directory', '*']);
+} catch (err) {
+  console.error('failed to set safe.directory:', err.message);
+}
+
 // Per-repo lock so overlapping webhooks (or a webhook landing mid-poll)
 // don't run concurrent git commands. If a run is already in progress when
 // another trigger comes in, we mark it "pending" and re-run once the
