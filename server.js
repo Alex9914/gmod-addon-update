@@ -208,8 +208,8 @@ app.post('/reload-config', (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`Webhook server listening on port ${PORT}`);
-});
 
-// Check everything once at boot, then on a fixed 30-minute cadence.
-checkAllAddons();
-setInterval(checkAllAddons, POLL_INTERVAL_MS);
+  // Check everything once at boot, then on a fixed 30-minute cadence.
+  checkAllAddons();
+  setInterval(checkAllAddons, POLL_INTERVAL_MS);
+});
