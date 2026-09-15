@@ -25,9 +25,9 @@ function loadConfig() {
   }
   for (const a of parsed.addons) {
     console.log(a.repo);
-    if (!a.repo || !a.path || !a.pat || !a.secret) {
+    if (!a.repo || !a.path) {
       throw new Error(
-        `addon entry missing one of "repo", "path", "pat", "secret": ${JSON.stringify({ repo: a.repo, path: a.path })}`
+        `addon entry missing one of "repo", "path": ${JSON.stringify({ repo: a.repo, path: a.path })}`
       );
     }
     a.branch = a.branch || 'main';
@@ -81,7 +81,7 @@ async function runUpdate(addon) {
   try {
     const gitDir = path.join(addon.path, '.git');
     const url = `https://github.com/${addon.repo}.git`
-    const authed = `https://${addon.pat}@github.com/${addon.repo}.git`
+    const authed = addon.pat && `https://${addon.pat}@github.com/${addon.repo}.git` || url
 
     if (!fs.existsSync(gitDir)) {
       fs.mkdirSync(addon.path, { recursive: true });
@@ -211,6 +211,11 @@ app.post('/webhook', (req, res) => {
   if (!addon) {
     console.warn(`[${repoFullName}] no matching addon config, ignoring (delivery ${delivery})`);
     return res.status(404).send('unknown repo');
+  }
+
+  if (!addon.secret) {
+    console.warn(`[${repoFullName}] no matching addon secret, ignoring (delivery ${delivery})`);
+    return res.status(404).send('invalid repo');
   }
 
   if (!verifySignature(addon.secret, req.body, signature)) {
