@@ -45,4 +45,4 @@ jobs:
           package-name: ${{ env.PACKAGE_NAME }}
           package-type: 'container'
           min-versions-to-keep: 3
-          delete-only-untagged-versions: 'false'
+          delete-only-untagged-versions: 'true'
