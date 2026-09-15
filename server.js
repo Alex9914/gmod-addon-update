@@ -25,9 +25,9 @@ function loadConfig() {
   }
   for (const a of parsed.addons) {
     console.log(a.repo);
-    if (!a.repo || !a.url || !a.path || !a.pat || !a.secret) {
+    if (!a.repo || !a.path || !a.pat || !a.secret) {
       throw new Error(
-        `addon entry missing one of "repo", "url", "path", "pat", "secret": ${JSON.stringify({ repo: a.repo, path: a.path })}`
+        `addon entry missing one of "repo", "path", "pat", "secret": ${JSON.stringify({ repo: a.repo, path: a.path })}`
       );
     }
     a.branch = a.branch || 'main';
@@ -70,14 +70,6 @@ function verifySignature(secret, payloadBuffer, signatureHeader) {
   return crypto.timingSafeEqual(expectedBuf, givenBuf);
 }
 
-// Builds an https URL with the PAT embedded so git can authenticate for a
-// single command. This is only ever passed as a one-off argument to
-// `git fetch` — it is never written into .git/config, so the PAT never
-// sits in a file on disk (see runUpdate).
-function authedUrl(url, pat) {
-  return url.replace(/^https:\/\//, `https://${encodeURIComponent(pat)}@`);
-}
-
 async function runUpdate(addon) {
   const s = getState(addon.repo);
   if (s.busy) {
@@ -88,7 +80,8 @@ async function runUpdate(addon) {
   s.busy = true;
   try {
     const gitDir = path.join(addon.path, '.git');
-    const authed = authedUrl(addon.url, addon.pat);
+    const url = `https://github.com/${addon.repo}.git`
+    const authed = `https://${addon.pat}@github.com/${addon.repo}.git`
 
     if (!fs.existsSync(gitDir)) {
       fs.mkdirSync(addon.path, { recursive: true });
@@ -96,7 +89,7 @@ async function runUpdate(addon) {
       await execFileAsync('git', ['init'], { cwd: addon.path });
       // Remote stays the clean, tokenless URL — the PAT is only ever
       // supplied explicitly per-fetch, never stored in this repo's config.
-      await execFileAsync('git', ['remote', 'add', 'origin', addon.url], { cwd: addon.path });
+      await execFileAsync('git', ['remote', 'add', 'origin', url], { cwd: addon.path });
       await execFileAsync('git', ['fetch', '--depth', '1', authed, addon.branch], { cwd: addon.path });
       await execFileAsync('git', ['checkout', '-B', addon.branch, 'FETCH_HEAD'], { cwd: addon.path });
     } else {
