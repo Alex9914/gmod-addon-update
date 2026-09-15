@@ -107,13 +107,16 @@ async function runUpdate(addon) {
         await execFileAsync('git', ['reset', '--hard', 'FETCH_HEAD'], { cwd: addon.path });
         await execFileAsync('git', ['clean', '-fd'], { cwd: addon.path });
         console.log(`[${addon.repo}] update complete`);
+        notifyDiscord(true, addon.repo);
       }
+      notifyDiscord(false, addon.repo);
     }
   } catch (err) {
     // Strip the token out of any error text before logging, in case git
     // ever echoes the URL back (e.g. in a "repository not found" error).
     const msg = addon.pat ? err.message.split(addon.pat).join('***') : err.message;
     console.error(`[${addon.repo}] update failed:`, msg);
+    notifyDiscord(false, addon.repo);
   } finally {
     s.busy = false;
     if (s.pending) {
@@ -138,6 +141,49 @@ async function checkAllAddons() {
   console.log(`Running scheduled check for ${addons.length} addon(s)...`);
   for (const addon of addons) {
     runUpdate(addon); // fire-and-forget; per-repo lock keeps this safe alongside webhooks
+  }
+}
+
+async function notifyDiscord(success, addonRepo) {
+  const webhook = process.env.WEBHOOK;
+
+  if (!webhook)
+    return;
+
+  if (success) {
+    try {
+      await fetch(webhook, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: "gmod-addon-updater",
+          embeds: [{
+            title: `Addon updated: ${addonRepo}`,
+            color: 0x57F287, // green
+            timestamp: new Date().toISOString(),
+          }],
+        }),
+      });
+    } catch (err) {
+      console.error('discord notify failed:', err.message);
+    }
+  } else {
+    try {
+      await fetch(webhook, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: "gmod-addon-updater",
+          embeds: [{
+            title: `Addon failed to update: ${addonRepo}`,
+            color: 15548997, // green
+            timestamp: new Date().toISOString(),
+          }],
+        }),
+      });
+    } catch (err) {
+      console.error('discord notify failed:', err.message);
+    }
   }
 }
 
