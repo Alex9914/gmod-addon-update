@@ -1,0 +1,41 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>gmod-addon-webhook</Name>
+  <Repository>ghcr.io/YOUR_GH_USERNAME/gmod-addon-webhook:latest</Repository>
+  <Registry>https://ghcr.io</Registry>
+  <Branch/>
+  <Network>bridge</Network>
+  <MyIP/>
+  <Shell>sh</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/YOUR_GH_USERNAME/gmod-addon-webhook</Support>
+  <Project>https://github.com/YOUR_GH_USERNAME/gmod-addon-webhook</Project>
+  <Overview>
+    Receives GitHub push webhooks from private Garry's Mod addon repos and
+    git-pulls the matching addon directory. Configure addons in
+    config/addons.json. Requires a private GHCR login on this Unraid box
+    since the image is private (see Docker &gt; Registry in Unraid, or
+    docker login ghcr.io on the CLI, using a GitHub PAT with read:packages).
+  </Overview>
+  <Category>Tools: Utilities</Category>
+  <WebUI>http://[IP]:[PORT:9000]/healthz</WebUI>
+  <TemplateURL/>
+  <Icon>https://raw.githubusercontent.com/YOUR_GH_USERNAME/gmod-addon-webhook/main/icon.png</Icon>
+  <ExtraParams/>
+  <DonateText/>
+  <DonateLink/>
+  <Requires/>
+  <Config Name="WebUI Port" Target="9000" Default="9000" Mode="tcp" Description="Port the webhook server listens on. Point your GitHub webhooks (and any reverse proxy) at this." Type="Port" Display="always" Required="true" Mask="false">9000</Config>
+
+  <Config Name="Webhook Secret" Target="WEBHOOK_SECRET" Default="" Mode="" Description="Shared secret used to verify GitHub's X-Hub-Signature-256 header. Must match the secret set on each addon repo's webhook." Type="Variable" Display="always" Required="true" Mask="true"></Config>
+
+  <Config Name="Reload Token" Target="RELOAD_TOKEN" Default="" Mode="" Description="Token required to call POST /reload-config to pick up addons.json changes without restarting the container." Type="Variable" Display="always" Required="false" Mask="true"></Config>
+
+  <Config Name="Git SSH Command" Target="GIT_SSH_COMMAND" Default="ssh -i /run/secrets/deploy_key -o StrictHostKeyChecking=accept-new" Mode="" Description="SSH command used for git fetch/clone, pointing at the mounted deploy key below." Type="Variable" Display="advanced" Required="false" Mask="false">ssh -i /run/secrets/deploy_key -o StrictHostKeyChecking=accept-new</Config>
+
+  <Config Name="Addons Config" Target="/app/config/addons.json" Default="/mnt/user/appdata/gmod-addon-webhook/addons.json" Mode="ro" Description="JSON file listing each addon: repo, url, path, branch. See addons.example.json in the repo." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/gmod-addon-webhook/addons.json</Config>
+
+  <Config Name="Deploy Key" Target="/run/secrets/deploy_key" Default="/mnt/user/appdata/gmod-addon-webhook/deploy_key" Mode="ro" Description="Read-only SSH private key (deploy key) used to git pull/clone the private addon repos." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/gmod-addon-webhook/deploy_key</Config>
+
+  <Config Name="GMod Addons Directory" Target="/gmod/garrysmod/addons" Default="/mnt/user/appdata/gmodserver/garrysmod/addons" Mode="rw" Description="Mount your actual GMod server's addons directory here — paths in addons.json should live under this." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/gmodserver/garrysmod/addons</Config>
+</Container>
