@@ -92,13 +92,23 @@ async function runUpdate(addon) {
       await execFileAsync('git', ['remote', 'add', 'origin', url], { cwd: addon.path });
       await execFileAsync('git', ['fetch', '--depth', '1', authed, addon.branch], { cwd: addon.path });
       await execFileAsync('git', ['checkout', '-B', addon.branch, 'FETCH_HEAD'], { cwd: addon.path });
+
+      console.log(`[${addon.repo}] pull complete`);
     } else {
       console.log(`[${addon.repo}] fetching ${addon.branch} in ${addon.path}`);
       await execFileAsync('git', ['fetch', authed, addon.branch], { cwd: addon.path });
-      await execFileAsync('git', ['reset', '--hard', 'FETCH_HEAD'], { cwd: addon.path });
-      await execFileAsync('git', ['clean', '-fd'], { cwd: addon.path });
+
+      const { stdout: localHead } = await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: addon.path });
+      const { stdout: remoteHead } = await execFileAsync('git', ['rev-parse', 'FETCH_HEAD'], { cwd: addon.path });
+
+      if (localHead.trim() === remoteHead.trim()) {
+        console.log(`[${addon.repo}] already up to date`);
+      } else {
+        await execFileAsync('git', ['reset', '--hard', 'FETCH_HEAD'], { cwd: addon.path });
+        await execFileAsync('git', ['clean', '-fd'], { cwd: addon.path });
+        console.log(`[${addon.repo}] update complete`);
+      }
     }
-    console.log(`[${addon.repo}] update complete`);
   } catch (err) {
     // Strip the token out of any error text before logging, in case git
     // ever echoes the URL back (e.g. in a "repository not found" error).
