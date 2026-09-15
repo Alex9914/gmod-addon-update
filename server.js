@@ -109,7 +109,6 @@ async function runUpdate(addon) {
         console.log(`[${addon.repo}] update complete`);
         notifyDiscord(true, addon.repo);
       }
-      notifyDiscord(false, addon.repo);
     }
   } catch (err) {
     // Strip the token out of any error text before logging, in case git
