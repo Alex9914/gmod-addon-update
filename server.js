@@ -14,7 +14,7 @@ try {
 }
 
 const PORT = 9000;
-const CONFIG_PATH = path.resolve('./config/config.json.nil');
+const CONFIG_PATH = path.resolve('./config/config.json');
 const POLL_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes
 
 function loadConfig() {
