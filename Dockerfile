@@ -10,7 +10,8 @@ RUN npm install --omit=dev
 COPY server.js ./
 COPY config ./config
 
-ENV PORT=9000
+ENV RELOAD_TOKEN=""
+
 EXPOSE 9000
 
 CMD ["node", "server.js"]
