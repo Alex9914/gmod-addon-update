@@ -40,7 +40,7 @@ jobs:
       - name: Remove old packages
         uses: actions/delete-package-versions@v5
         with: 
-          package-name: ${{ env.IMAGE_NAME }}
+          package-name: ${{ github.repository }}
           package-type: 'container'
           min-versions-to-keep: 3
           delete-only-untagged-versions: 'false'
