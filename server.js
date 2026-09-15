@@ -7,10 +7,15 @@ import path from 'node:path';
 
 const execFileAsync = promisify(execFile);
 
+try {
+  process.loadEnvFile();
+} catch (err) {
+  if (err.code !== 'ENOENT') throw err; // ignore "no .env file", surface anything else
+}
+
 const PORT = process.env.PORT || 9000;
-const GLOBAL_SECRET = process.env.WEBHOOK_SECRET || '';
-const CONFIG_PATH = process.env.CONFIG_PATH || path.resolve('./config/addons.json');
-const GIT_SSH_COMMAND = process.env.GIT_SSH_COMMAND; // e.g. "ssh -i /run/secrets/deploy_key -o StrictHostKeyChecking=accept-new"
+const CONFIG_PATH = process.env.CONFIG_PATH || path.resolve('./config/config.json.nil');
+const POLL_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes
 
 function loadConfig() {
   const raw = fs.readFileSync(CONFIG_PATH, 'utf-8');
@@ -19,8 +24,11 @@ function loadConfig() {
     throw new Error('config.addons must be an array');
   }
   for (const a of parsed.addons) {
-    if (!a.repo || !a.path) {
-      throw new Error(`addon entry missing "repo" or "path": ${JSON.stringify(a)}`);
+    console.log(a.repo);
+    if (!a.repo || !a.url || !a.path || !a.pat || !a.secret) {
+      throw new Error(
+        `addon entry missing one of "repo", "url", "path", "pat", "secret": ${JSON.stringify({ repo: a.repo, path: a.path })}`
+      );
     }
     a.branch = a.branch || 'main';
   }
@@ -31,9 +39,10 @@ let addons = loadConfig();
 console.log(`Loaded ${addons.length} addon(s) from ${CONFIG_PATH}`);
 addons.forEach(a => console.log(`  - ${a.repo} -> ${a.path} (${a.branch})`));
 
-// Per-repo lock so overlapping webhooks don't run concurrent git commands.
-// If a run is already in progress when a new push arrives, we mark it
-// "pending" and re-run once the current one finishes (coalescing bursts).
+// Per-repo lock so overlapping webhooks (or a webhook landing mid-poll)
+// don't run concurrent git commands. If a run is already in progress when
+// another trigger comes in, we mark it "pending" and re-run once the
+// current one finishes (coalescing bursts).
 const state = new Map(); // repo -> { busy: bool, pending: bool }
 
 function getState(repo) {
@@ -42,7 +51,6 @@ function getState(repo) {
 }
 
 function verifySignature(secret, payloadBuffer, signatureHeader) {
-  if (!secret) return true; // no secret configured -> skip verification (not recommended)
   if (!signatureHeader || !signatureHeader.startsWith('sha256=')) return false;
   const expected = 'sha256=' + crypto.createHmac('sha256', secret).update(payloadBuffer).digest('hex');
   const expectedBuf = Buffer.from(expected);
@@ -51,10 +59,12 @@ function verifySignature(secret, payloadBuffer, signatureHeader) {
   return crypto.timingSafeEqual(expectedBuf, givenBuf);
 }
 
-function execOpts(cwd) {
-  const env = { ...process.env };
-  if (GIT_SSH_COMMAND) env.GIT_SSH_COMMAND = GIT_SSH_COMMAND;
-  return { cwd, env };
+// Builds an https URL with the PAT embedded so git can authenticate for a
+// single command. This is only ever passed as a one-off argument to
+// `git fetch` — it is never written into .git/config, so the PAT never
+// sits in a file on disk (see runUpdate).
+function authedUrl(url, pat) {
+  return url.replace(/^https:\/\//, `https://${encodeURIComponent(pat)}@`);
 }
 
 async function runUpdate(addon) {
@@ -67,38 +77,53 @@ async function runUpdate(addon) {
   s.busy = true;
   try {
     const gitDir = path.join(addon.path, '.git');
+    const authed = authedUrl(addon.url, addon.pat);
+
     if (!fs.existsSync(gitDir)) {
-      if (!addon.url) {
-        throw new Error(`${addon.path} is not a git repo and no "url" set to clone from`);
-      }
       fs.mkdirSync(addon.path, { recursive: true });
-      console.log(`[${addon.repo}] no existing checkout, cloning ${addon.url} into ${addon.path}`);
-      await execFileAsync(
-        'git',
-        ['clone', '--branch', addon.branch, '--single-branch', addon.url, '.'],
-        execOpts(addon.path)
-      );
+      console.log(`[${addon.repo}] no existing checkout, cloning into ${addon.path}`);
+      await execFileAsync('git', ['init'], { cwd: addon.path });
+      // Remote stays the clean, tokenless URL — the PAT is only ever
+      // supplied explicitly per-fetch, never stored in this repo's config.
+      await execFileAsync('git', ['remote', 'add', 'origin', addon.url], { cwd: addon.path });
+      await execFileAsync('git', ['fetch', '--depth', '1', authed, addon.branch], { cwd: addon.path });
+      await execFileAsync('git', ['checkout', '-B', addon.branch, 'FETCH_HEAD'], { cwd: addon.path });
     } else {
       console.log(`[${addon.repo}] fetching ${addon.branch} in ${addon.path}`);
-      await execFileAsync('git', ['fetch', 'origin', addon.branch], execOpts(addon.path));
-      await execFileAsync('git', ['reset', '--hard', `origin/${addon.branch}`], execOpts(addon.path));
-      await execFileAsync('git', ['clean', '-fd'], execOpts(addon.path));
+      await execFileAsync('git', ['fetch', authed, addon.branch], { cwd: addon.path });
+      await execFileAsync('git', ['reset', '--hard', 'FETCH_HEAD'], { cwd: addon.path });
+      await execFileAsync('git', ['clean', '-fd'], { cwd: addon.path });
     }
     console.log(`[${addon.repo}] update complete`);
-
-    if (addon.command) {
-      console.log(`[${addon.repo}] running post-update command: ${addon.command}`);
-      const [cmd, ...args] = addon.command.split(' ');
-      await execFileAsync(cmd, args, execOpts(addon.path));
-    }
   } catch (err) {
-    console.error(`[${addon.repo}] update failed:`, err.message);
+    // Strip the token out of any error text before logging, in case git
+    // ever echoes the URL back (e.g. in a "repository not found" error).
+    const msg = addon.pat ? err.message.split(addon.pat).join('***') : err.message;
+    console.error(`[${addon.repo}] update failed:`, msg);
   } finally {
     s.busy = false;
     if (s.pending) {
       s.pending = false;
       runUpdate(addon);
     }
+  }
+}
+
+// Checks every configured addon. Used on startup and on the recurring
+// timer below — a safety net that catches any push whose webhook never
+// arrived (delivery failure, downtime, addon added but no webhook set up
+// yet, etc). Reloads config.json first so newly added/removed addons are
+// picked up without a restart.
+async function checkAllAddons() {
+  try {
+    addons = loadConfig();
+  } catch (err) {
+    console.error('failed to reload config.json for scheduled check:', err.message);
+    return;
+  }
+  console.log(`Running scheduled check for ${addons.length} addon(s)...`);
+  for (const addon of addons) {
+    runUpdate(addon); // fire-and-forget; per-repo lock keeps this safe alongside webhooks
   }
 }
 
@@ -129,8 +154,7 @@ app.post('/webhook', (req, res) => {
     return res.status(404).send('unknown repo');
   }
 
-  const secret = addon.secret || GLOBAL_SECRET;
-  if (!verifySignature(secret, req.body, signature)) {
+  if (!verifySignature(addon.secret, req.body, signature)) {
     console.warn(`[${repoFullName}] signature verification failed (delivery ${delivery})`);
     return res.status(401).send('invalid signature');
   }
@@ -171,3 +195,7 @@ app.post('/reload-config', (req, res) => {
 app.listen(PORT, () => {
   console.log(`Webhook server listening on port ${PORT}`);
 });
+
+// Check everything once at boot, then on a fixed 30-minute cadence.
+checkAllAddons();
+setInterval(checkAllAddons, POLL_INTERVAL_MS);

@@ -1,0 +1,12 @@
+{
+  "addons": [
+    {
+      "repo": "addon1",
+      "url": "https://github.com/user/addon1.git",
+      "path": "./test/addon1",
+      "branch": "main",
+      "pat": "github_pat_xxxx",
+      "secret": "xxxx"
+    }
+  ]
+}
